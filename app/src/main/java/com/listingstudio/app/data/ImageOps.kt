@@ -3,20 +3,27 @@ package com.listingstudio.app.data
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.MediaStore.Images.Media
 import androidx.core.graphics.scale
+import com.listingstudio.app.model.Background
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 object ImageOps {
 
-    /** Load a picked image into a mutable software bitmap. */
+    /** Load a picked image into a mutable ARGB bitmap. */
     fun load(context: Context, uri: Uri): Bitmap {
         val bmp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val src = ImageDecoder.createSource(context.contentResolver, uri)
@@ -30,23 +37,55 @@ object ImageOps {
     }
 
     /**
-     * Fit the image, centered, onto a square white canvas of [size]px — the standard
-     * format marketplaces expect. Keeps aspect ratio and pads with white.
+     * Render the cut-out subject centered on a square canvas with the chosen background,
+     * optionally with a soft drop shadow. Used for both the on-screen preview and export.
      */
-    fun toSquareCanvas(source: Bitmap, size: Int): Bitmap {
-        val canvasBmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(canvasBmp)
-        canvas.drawColor(Color.WHITE)
+    fun render(cutout: Bitmap, background: Background, shadow: Boolean, size: Int): Bitmap {
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        drawBackground(canvas, background, size)
 
-        val scale = minOf(size.toFloat() / source.width, size.toFloat() / source.height)
-        val w = (source.width * scale).toInt().coerceAtLeast(1)
-        val h = (source.height * scale).toInt().coerceAtLeast(1)
-        val scaled = source.scale(w, h)
-        canvas.drawBitmap(scaled, (size - w) / 2f, (size - h) / 2f, null)
-        return canvasBmp
+        // Fit the subject into ~82% of the canvas, centered.
+        val scale = (size * 0.82f) / max(cutout.width, cutout.height)
+        val w = (cutout.width * scale).roundToInt().coerceAtLeast(1)
+        val h = (cutout.height * scale).roundToInt().coerceAtLeast(1)
+        val scaled = cutout.scale(w, h)
+        val left = (size - w) / 2f
+        val top = (size - h) / 2f
+
+        if (shadow) {
+            val blur = size * 0.012f
+            val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
+            }
+            val offset = IntArray(2)
+            val alpha = scaled.extractAlpha(shadowPaint, offset)
+            val dy = size * 0.02f
+            val tint = Paint().apply { color = Color.argb(110, 0, 0, 0) }
+            canvas.drawBitmap(alpha, left + offset[0], top + offset[1] + dy, tint)
+        }
+
+        canvas.drawBitmap(scaled, left, top, null)
+        return out
     }
 
-    /** Save a bitmap to the device gallery under Pictures/ListingStudio. */
+    private fun drawBackground(canvas: Canvas, background: Background, size: Int) {
+        when (background) {
+            Background.WHITE -> canvas.drawColor(Color.WHITE)
+            Background.STUDIO -> {
+                val paint = Paint().apply {
+                    shader = LinearGradient(
+                        0f, 0f, 0f, size.toFloat(),
+                        Color.rgb(245, 246, 248), Color.rgb(214, 218, 224),
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawRect(0f, 0f, size.toFloat(), size.toFloat(), paint)
+            }
+        }
+    }
+
+    /** Save a bitmap to the gallery under Pictures/ListingStudio. */
     suspend fun saveToGallery(context: Context, bitmap: Bitmap, name: String): Uri? =
         withContext(Dispatchers.IO) {
             val values = ContentValues().apply {
@@ -57,9 +96,7 @@ object ImageOps {
                 }
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
-            ) ?: return@withContext null
+            val uri = resolver.insert(Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext null
             resolver.openOutputStream(uri)?.use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
             }

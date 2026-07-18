@@ -58,7 +58,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     implementation("io.coil-kt:coil-compose:2.6.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // On-device (free, offline) subject segmentation for background removal
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 }

@@ -4,11 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,20 +13,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.listingstudio.app.model.AiTool
+import com.listingstudio.app.model.Background
 import com.listingstudio.app.model.Marketplace
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScreen(vm: EditorViewModel = viewModel()) {
     val state by vm.state.collectAsState()
-    var showSettings by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
@@ -44,9 +40,6 @@ fun AppScreen(vm: EditorViewModel = viewModel()) {
                     IconButton(onClick = { vm.revert() }, enabled = state.original != null) {
                         Icon(Icons.Default.Refresh, contentDescription = "Revert")
                     }
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
-                    }
                 }
             )
         }
@@ -57,16 +50,7 @@ fun AppScreen(vm: EditorViewModel = viewModel()) {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            if (state.apiKey.isBlank()) {
-                AssistChip(
-                    onClick = { showSettings = true },
-                    label = { Text("Tap to add your Gemini API key") },
-                    leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) }
-                )
-                Spacer(Modifier.height(12.dp))
-            }
-
-            // Preview area
+            // Preview
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -92,19 +76,19 @@ fun AppScreen(vm: EditorViewModel = viewModel()) {
                 }
                 if (state.busy) {
                     Box(
-                        Modifier.matchParentSize().background(androidx.compose.ui.graphics.Color(0x88000000)),
+                        Modifier.matchParentSize().background(Color(0x88000000)),
                         contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator(color = androidx.compose.ui.graphics.Color.White) }
+                    ) { CircularProgressIndicator(color = Color.White) }
                 }
             }
 
             Spacer(Modifier.height(8.dp))
-            state.status?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(8.dp))
-            }
+            Text(
+                state.status ?: "100% on-device — no account, no internet needed",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(8.dp))
 
-            // Pick / Export row
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { picker.launch("image/*") }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.PhotoLibrary, contentDescription = null)
@@ -121,64 +105,40 @@ fun AppScreen(vm: EditorViewModel = viewModel()) {
             }
 
             Spacer(Modifier.height(12.dp))
-            Text("AI Tools", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Background", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
-
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AiTool.values().forEach { tool ->
-                    ElevatedButton(
-                        onClick = { vm.applyTool(tool) },
-                        enabled = state.current != null && !state.busy
-                    ) { Text(tool.label) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Background.values().forEach { bg ->
+                    FilterChip(
+                        selected = state.background == bg && state.hasCutout,
+                        onClick = { vm.setBackground(bg) },
+                        enabled = state.original != null && !state.busy,
+                        label = { Text(bg.label) }
+                    )
                 }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = state.shadow,
+                    onClick = { vm.toggleShadow() },
+                    enabled = state.original != null && !state.busy,
+                    leadingIcon = {
+                        if (state.shadow) Icon(Icons.Default.Check, contentDescription = null)
+                    },
+                    label = { Text("Add shadow") }
+                )
             }
         }
     }
 
-    if (showSettings) {
-        SettingsDialog(
-            current = state.apiKey,
-            onSave = { vm.saveApiKey(it); showSettings = false },
-            onDismiss = { showSettings = false }
-        )
-    }
     if (showExport) {
         ExportDialog(
             onPick = { vm.exportFor(it); showExport = false },
             onDismiss = { showExport = false }
         )
     }
-}
-
-@Composable
-private fun SettingsDialog(current: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Gemini API key") },
-        text = {
-            Column {
-                Text(
-                    "Get a free key at aistudio.google.com/apikey, then paste it here. " +
-                        "It's stored only on this device.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("API key") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation()
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 @Composable
@@ -194,7 +154,7 @@ private fun ExportDialog(onPick: (Marketplace) -> Unit, onDismiss: () -> Unit) {
                     }
                 }
                 Text(
-                    "Saves a square, white-background JPG sized for the marketplace.",
+                    "Saves a square JPG sized for the marketplace, into your gallery.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
